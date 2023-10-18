@@ -1,0 +1,263 @@
+#!/usr/bin/bash
+
+StartDir=$(dirname "$(readlink -fn "$0")")
+BOOT_DIR="$StartDir/rpi-boot"
+ROOT_DIR="$StartDir/rpi-root"
+echo "$StartDir"
+cd "$StartDir"
+CONFIG_FILE="$StartDir/rpi-setup.conf"
+
+function CheckRequirements {
+	if [ "$(id -u)" != "0" ]; then
+		printf "Please execute as root"
+		exit 1
+	fi
+	if [ ! -f "$CONFIG_FILE" ]; then
+		echo "Config file not found: $CONFIG_FILE"
+		exit 1
+	fi
+	source $CONFIG_FILE
+
+	if [ -z $FS_DEVICE ]; then
+		echo "[*] FS_DEVICE cannot be empty, check $CONFIG_FILE [*]"
+		exit 1
+	fi
+
+	if [ $DOWNLOAD_IMG == "no" ] && [ -z $IMAGE_FILE_PATH ]; then
+		echo "[*] IMAGE_FILE_PATH option must be provided if DOWNLOAD_IMG is no or empty , check $CONFIG_FILE [*]"
+		exit 1
+	fi
+}
+
+function ConfirmPrompt {
+	read -ep "$1 [Y/N]: " answer
+	case ${answer,,} in
+	y) echo "y" ;;
+	n) echo "n" ;;
+	*) ConfirmPrompt "$1" ;;
+	esac
+}
+
+function DownloadRaspiOSImage {
+
+	downloadlink=$(curl https://downloads.raspberrypi.com/raspios_lite_arm64_latest |
+		grep -o '<a href=['"'"'"][^"'"'"']*['"'"'"]' |
+		sed -e 's/^<a href=["'"'"']//' -e 's/["'"'"']$//')
+
+	wget -c "$downloadlink"
+	image_archive=$(echo "$downloadlink" | sed 's/.*\///')
+	xz -d "$image_archive"
+	image_file=$(ls | grep img)
+	# Get absoulte path of image_file
+	image_file_path=$(readlink -f "$image_file")
+	IMAGE_FILE_PATH="$image_file_path"
+}
+
+function GetImage {
+	if [ $DOWNLOAD_IMG == "yes" ] && [ -z $IMAGE_FILE_PATH ]; then
+		DownloadRaspiOSImage
+	fi
+}
+#
+function FormatDevice {
+	choice=$(ConfirmPrompt "[**]ALL DATA WILL BE LOST[**] Are you sure you want to format $FS_DEVICE ? ")
+	if [ "$choice" == "y" ]; then
+		# unmount filesystem
+    echo -e "\n\n"
+		choice2=$(ConfirmPrompt "[**]ALL DATA WILL BE LOST[**] Are you sure you want to format $FS_DEVICE ? ")
+		if [ "$choice2" == "y" ]; then
+      echo -e "\n\n"
+			printf "\nUnmounting $FS_DEVICE and its partitions\n"
+			umount -fl $FS_DEVICE* 2>/dev/null
+
+			mkfs.ext4 -L $VOLUME_LABEL $FS_DEVICE 2>/dev/null
+			# Write image to FS_DEVICE
+			printf "\nWRITING IMAGE TO DEVICE\n"
+			dd status=progress if=$IMAGE_FILE_PATH of=$FS_DEVICE bs=1M conv=fsync
+			printf "[+]COMPLETE WRITING IMAGE[+]\n"
+    else
+      exit 0
+		fi
+
+	fi
+}
+
+function SetupUser {
+	echo "Setup user"
+	USER_PWD=$(openssl passwd -6 "$USER_PASSWORD")
+	echo "$USERNAME:$USER_PWD" >"$BOOT_DIR/userconf.txt"
+	mkdir -p $ROOT_DIR/etc/systemd/system/getty@tty1.service.d/
+	cat <<EOF >$ROOT_DIR/etc/systemd/system/getty@tty1.service.d/autologin.conf
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin $USERNAME --noclear %I 38400 \$TERM
+EOF
+}
+
+function SetupNetwork {
+	CURRENT_HOSTNAME=$(cat $ROOT_DIR/etc/hostname | tr -d " \t\n\r")
+	echo $HOSTNAME >$ROOT_DIR/etc/hostname
+	sed -i "s/127.0.1.1.*$CURRENT_HOSTNAME/127.0.1.1\t$HOSTNAME/g" $ROOT_DIR/etc/hosts
+
+	if [ $USE_STATIC_IP == "yes" ]; then
+		SetupStaticIP
+	fi
+}
+
+function SetupStaticIP {
+	GATEWAY=$(echo $STATIC_IP_ADDRESS | sed 's/\.[0-9]*\/[0-9]*$/\.1/')
+
+	cat <<EOF >$ROOT_DIR/etc/NetworkManager/NetworkManager.conf
+[ifupdown]
+managed=true
+EOF
+
+	cat <<EOF >$ROOT_DIR/etc/NetworkManager/dispatcher.d/99-custom-routes
+#!/bin/bash
+
+if [ "\$2" = "up" ]; then
+    case "\$1" in
+        $STATIC_INTERFACE)
+            ip route del default
+            ip route add $GATEWAY dev $STATIC_INTERFACE
+            ip route add default via $GATEWAY
+            ;;
+    esac
+fi
+EOF
+	chmod +x $ROOT_DIR/etc/NetworkManager/dispatcher.d/99-custom-routes
+
+	cat <<EOF >$ROOT_DIR/etc/NetworkManager/system-connections/Kejani.nmconnection
+[connection]
+id=$WIFI_SSID
+uuid=0af1917d-8ac1-4737-b6aa-bfda8f842658
+type=wifi
+interface-name=$STATIC_INTERFACE
+ 
+[wifi]
+mode=infrastructure
+ssid=$WIFI_SSID
+ 
+[wifi-security]
+auth-alg=open
+key-mgmt=wpa-psk
+psk=$WIFI_PSK
+ 
+[ipv4]
+method=manual
+address1=$STATIC_IP_ADDRESS
+gateway1=$GATEWAY
+dns=$STATIC_DOMAIN_NAME_SERVERS
+ 
+EOF
+	chmod 600 $ROOT_DIR/etc/NetworkManager/system-connections/Kejani.nmconnection
+}
+
+function SetupFirstRun {
+	cat <<EOF >"$BOOT_DIR/firstrun.sh"
+#!/bin/bash
+
+set +e
+
+CURRENT_HOSTNAME=\`cat hostname | tr -d " \t\n\r"\`
+echo $HOSTNAME > /etc/hostname
+sed -i "s/127.0.1.1.*\$CURRENT_HOSTNAME/127.0.1.1\t$HOSTNAME/g" /etc/hosts
+
+FIRSTUSER=\`getent passwd 1000 | cut -d: -f1\`
+FIRSTUSERHOME=\`getent passwd 1000 | cut -d: -f6\`
+systemctl enable ssh
+echo "\$FIRSTUSER:"'$(openssl passwd -6 "$USER_PASSWORD")' | chpasswd -e
+if [ "\$FIRSTUSER" != "$USERNAME" ]; then
+  usermod -l "$USERNAME" "\$FIRSTUSER"
+  usermod -m -d "/home/$USERNAME" "$USERNAME"
+  groupmod -n "$USERNAME" "\$FIRSTUSER"
+  if grep -q "^autologin-user=" /etc/lightdm/lightdm.conf ; then
+     sed /etc/lightdm/lightdm.conf -i -e "s/^autologin-user=.*/autologin-user=$USERNAME/"
+  fi
+  if [ -f /etc/systemd/system/getty@tty1.service.d/autologin.conf ]; then
+     sed /etc/systemd/system/getty@tty1.service.d/autologin.conf -i -e "s/\$FIRSTUSER/$USERNAME/"
+  fi
+  if [ -f /etc/sudoers.d/010_pi-nopasswd ]; then
+     sed -i "s/^\$FIRSTUSER /$USERNAME /" /etc/sudoers.d/010_pi-nopasswd
+  fi
+fi
+cat >/etc/wpa_supplicant/wpa_supplicant.conf <<'WPAEOF'
+country=$WIFI_COUNTRY_CODE
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+ap_scan=1
+
+update_config=1
+$(wpa_passphrase $WIFI_SSID $WIFI_PSK)
+WPAEOF
+rfkill unblock wifi
+for filename in /var/lib/systemd/rfkill/*:wlan ; do
+     echo 0 > \$filename
+ done
+rm -f /etc/localtime
+echo "$TIMEZONE" >/etc/timezone
+dpkg-reconfigure -f noninteractive tzdata
+cat >/etc/default/keyboard <<'KBEOF'
+XKBMODEL="pc105"
+XKBLAYOUT="us"
+XKBVARIANT=""
+XKBOPTIONS=""
+
+KBEOF
+dpkg-reconfigure -f noninteractive keyboard-configuration
+systemctl enable getty@tty1.service
+rm -f /boot/firstrun.sh
+sed -i 's| systemd.run.*||g' /boot/cmdline.txt
+exit 0
+EOF
+}
+
+function SetupCMDLine {
+	PARTITIONS=($(lsblk -no PARTUUID $FS_DEVICE))
+	ROOT_PART=${PARTITIONS[1]}
+	cat <<EOF >"$BOOT_DIR/cmdline.txt"
+IFconsole=serial0,115200 console=tty1 root=PARTUUID=$ROOT_PART  rootfstype=ext4 fsck.repair=yes rootwait quiet init=/usr/lib/raspberrypi-sys-mods/firstboot cfg80211.ieee80211_regdom=$WIFI_COUNTRY_CODE systemd.run=/boot/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target
+EOF
+}
+
+function SetupRPI {
+
+	rm -rf $BOOT_DIR $ROOT_DIR
+	#
+	mkdir -p $BOOT_DIR
+	mkdir -p $ROOT_DIR
+	#
+	# read -p "Enter boot partition: (mostly first partition): " boot_partition
+	PARTITIONS=($(lsblk -l -n -o NAME -x NAME "$FS_DEVICE" | grep "^$FS_DEVICE_NAME" | grep -v "^$FS_DEVICE_NAME$"))
+	BOOT_PART="$FS_DEVICE_PATH/${PARTITIONS[0]}"
+	ROOT_PART="$FS_DEVICE_PATH/${PARTITIONS[1]}"
+
+	mount $BOOT_PART $BOOT_DIR
+	mount $ROOT_PART $ROOT_DIR
+
+	# Enable ssh
+	touch $BOOT_DIR/ssh
+	SetupUser
+	SetupStaticIP
+	SetupFirstRun
+	SetupCMDLine
+
+}
+
+function TearDownScript {
+  umount -fl $FS_DEVICE* 2>/dev/null
+}
+
+function Main {
+	echo "CheckRequirements"
+	CheckRequirements
+	echo "GetImage"
+	GetImage
+	echo "FormatDevice"
+	FormatDevice
+	echo "SetupRPI"
+	SetupRPI
+	echo "TearDownScript"
+	TearDownScript
+}
+
+Main
