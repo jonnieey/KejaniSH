@@ -3,28 +3,29 @@
 StartDir=$(dirname "$(readlink -fn "$0")")
 BOOT_DIR="$StartDir/rpi-boot"
 ROOT_DIR="$StartDir/rpi-root"
-echo "$StartDir"
 cd "$StartDir"
-CONFIG_FILE="$StartDir/rpi-setup.conf"
+
+# First argument provides config file. If not provided use default
+CONFIG_FILE="${1:-$StartDir/rpi-setup.conf}"
 
 function CheckRequirements {
 	if [ "$(id -u)" != "0" ]; then
-		printf "Please execute as root"
+		echo -e "\n\n[**] Please execute as root or sudoer[**]\n\n"
 		exit 1
 	fi
 	if [ ! -f "$CONFIG_FILE" ]; then
-		echo "Config file not found: $CONFIG_FILE"
+		echo -e "\n\nConfig file not found: $CONFIG_FILE\n\n"
 		exit 1
 	fi
-	source $CONFIG_FILE
+	source "$CONFIG_FILE"
 
-	if [ -z $FS_DEVICE ]; then
+	if [ -z "$FS_DEVICE" ]; then
 		echo "[*] FS_DEVICE cannot be empty, check $CONFIG_FILE [*]"
 		exit 1
 	fi
 
-	if [ $DOWNLOAD_IMG == "no" ] && [ -z $IMAGE_FILE_PATH ]; then
-		echo "[*] IMAGE_FILE_PATH option must be provided if DOWNLOAD_IMG is no or empty , check $CONFIG_FILE [*]"
+	if [ "$DOWNLOAD_IMG" == "no" ] && [ -z "$IMAGE_FILE_PATH" ]; then
+		echo "[*] IMAGE_FILE_PATH option must be provided if DOWNLOAD_IMG is no or empty, check $CONFIG_FILE [*]"
 		exit 1
 	fi
 }
@@ -39,13 +40,18 @@ function ConfirmPrompt {
 }
 
 function DownloadRaspiOSImage {
+	echo "Downloading RaspiOS Image"
 
-	downloadlink=$(curl https://downloads.raspberrypi.com/raspios_lite_arm64_latest |
-		grep -o '<a href=['"'"'"][^"'"'"']*['"'"'"]' |
-		sed -e 's/^<a href=["'"'"']//' -e 's/["'"'"']$//')
+	downloadlink=$(
+		curl https://downloads.raspberrypi.com/raspios_lite_arm64_latest |
+			grep -o '<a href=['"'"'"][^"'"'"']*['"'"'"]' |
+			echo "Extracting RaspiOS Image"
+		sed -e 's/^<a href=["'"'"']//' -e 's/["'"'"']$//'
+	)
 
 	wget -c "$downloadlink"
 	image_archive=$(echo "$downloadlink" | sed 's/.*\///')
+	echo "RaspiOS Image Path: $image_file_path"
 	xz -d "$image_archive"
 	image_file=$(ls | grep img)
 	# Get absoulte path of image_file
@@ -54,31 +60,30 @@ function DownloadRaspiOSImage {
 }
 
 function GetImage {
-	if [ $DOWNLOAD_IMG == "yes" ] && [ -z $IMAGE_FILE_PATH ]; then
+	if [[ $DOWNLOAD_IMG == "yes" && -z $IMAGE_FILE_PATH ]]; then
 		DownloadRaspiOSImage
 	fi
 }
-#
+
 function FormatDevice {
 	choice=$(ConfirmPrompt "[**]ALL DATA WILL BE LOST[**] Are you sure you want to format $FS_DEVICE ? ")
 	if [ "$choice" == "y" ]; then
 		# unmount filesystem
-    echo -e "\n\n"
+		echo -e "\n"
 		choice2=$(ConfirmPrompt "[**]ALL DATA WILL BE LOST[**] Are you sure you want to format $FS_DEVICE ? ")
 		if [ "$choice2" == "y" ]; then
-      echo -e "\n\n"
-			printf "\nUnmounting $FS_DEVICE and its partitions\n"
+			echo -e "\n\n"
+			echo -e "\nUnmounting $FS_DEVICE and its partitions\n"
 			umount -fl $FS_DEVICE* 2>/dev/null
 
 			mkfs.ext4 -L $VOLUME_LABEL $FS_DEVICE 2>/dev/null
 			# Write image to FS_DEVICE
-			printf "\nWRITING IMAGE TO DEVICE\n"
+			echo -e "\nWRITING IMAGE TO DEVICE\n"
 			dd status=progress if=$IMAGE_FILE_PATH of=$FS_DEVICE bs=1M conv=fsync
-			printf "[+]COMPLETE WRITING IMAGE[+]\n"
-    else
-      exit 0
+			echo -e "[+]COMPLETE WRITING IMAGE[+]\n"
+		else
+			exit 0
 		fi
-
 	fi
 }
 
@@ -87,11 +92,6 @@ function SetupUser {
 	USER_PWD=$(openssl passwd -6 "$USER_PASSWORD")
 	echo "$USERNAME:$USER_PWD" >"$BOOT_DIR/userconf.txt"
 	mkdir -p $ROOT_DIR/etc/systemd/system/getty@tty1.service.d/
-	cat <<EOF >$ROOT_DIR/etc/systemd/system/getty@tty1.service.d/autologin.conf
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin $USERNAME --noclear %I 38400 \$TERM
-EOF
 }
 
 function SetupNetwork {
@@ -171,15 +171,6 @@ if [ "\$FIRSTUSER" != "$USERNAME" ]; then
   usermod -l "$USERNAME" "\$FIRSTUSER"
   usermod -m -d "/home/$USERNAME" "$USERNAME"
   groupmod -n "$USERNAME" "\$FIRSTUSER"
-  if grep -q "^autologin-user=" /etc/lightdm/lightdm.conf ; then
-     sed /etc/lightdm/lightdm.conf -i -e "s/^autologin-user=.*/autologin-user=$USERNAME/"
-  fi
-  if [ -f /etc/systemd/system/getty@tty1.service.d/autologin.conf ]; then
-     sed /etc/systemd/system/getty@tty1.service.d/autologin.conf -i -e "s/\$FIRSTUSER/$USERNAME/"
-  fi
-  if [ -f /etc/sudoers.d/010_pi-nopasswd ]; then
-     sed -i "s/^\$FIRSTUSER /$USERNAME /" /etc/sudoers.d/010_pi-nopasswd
-  fi
 fi
 cat >/etc/wpa_supplicant/wpa_supplicant.conf <<'WPAEOF'
 country=$WIFI_COUNTRY_CODE
@@ -204,7 +195,6 @@ XKBOPTIONS=""
 
 KBEOF
 dpkg-reconfigure -f noninteractive keyboard-configuration
-systemctl enable getty@tty1.service
 rm -f /boot/firstrun.sh
 sed -i 's| systemd.run.*||g' /boot/cmdline.txt
 exit 0
@@ -221,9 +211,12 @@ EOF
 
 function SetupRPI {
 
+	echo -e "[+] remove Existing $BOOT_PART and $ROOT_PART [+]"
 	rm -rf $BOOT_DIR $ROOT_DIR
 	#
+	echo -e "[+] Create directory $BOOT_PART [+]"
 	mkdir -p $BOOT_DIR
+	echo -e "[+] Create directory $ROOT_PART [+]"
 	mkdir -p $ROOT_DIR
 	#
 	# read -p "Enter boot partition: (mostly first partition): " boot_partition
@@ -231,32 +224,38 @@ function SetupRPI {
 	BOOT_PART="$FS_DEVICE_PATH/${PARTITIONS[0]}"
 	ROOT_PART="$FS_DEVICE_PATH/${PARTITIONS[1]}"
 
+	echo -e "[+] Mounting $BOOT_PART to $BOOT_DIR [+]"
 	mount $BOOT_PART $BOOT_DIR
+	echo -e "[+] Mounting $ROOT_PART to $ROOT_DIR [+]"
 	mount $ROOT_PART $ROOT_DIR
 
 	# Enable ssh
 	touch $BOOT_DIR/ssh
+	echo -e "\n[++] SetupUser [++]\n"
 	SetupUser
+	echo -e "\n[++] SetupStaticIP [++]\n"
 	SetupStaticIP
+	echo -e "\n[++] SetupFirstRun [++]\n"
 	SetupFirstRun
+	echo -e "\n[++] SetupCMDLine [++]\n"
 	SetupCMDLine
-
 }
 
 function TearDownScript {
-  umount -fl $FS_DEVICE* 2>/dev/null
+	echo -e "\nUnmounting $FS_DEVICE and its partitions\n"
+	umount -fl $FS_DEVICE* 2>/dev/null
 }
 
 function Main {
-	echo "CheckRequirements"
+	echo -e "\n[++] CheckRequirements [++]"
 	CheckRequirements
-	echo "GetImage"
+	echo "\n[++] GetImage [++]\n"
 	GetImage
-	echo "FormatDevice"
+	echo "\n[++] FormatDevice [++]\n"
 	FormatDevice
-	echo "SetupRPI"
+	echo "\n[++] SetupRPI [++]\n"
 	SetupRPI
-	echo "TearDownScript"
+	echo "\n[++] TearDownScript [++]\n"
 	TearDownScript
 }
 
