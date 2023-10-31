@@ -72,13 +72,12 @@ function FormatDevice {
 		echo -e "\n"
 		choice2=$(ConfirmPrompt "[**]ALL DATA WILL BE LOST[**] Are you sure you want to format $FS_DEVICE ? ")
 		if [ "$choice2" == "y" ]; then
-			echo -e "\n\n"
 			echo -e "\nUnmounting $FS_DEVICE and its partitions\n"
 			umount -fl $FS_DEVICE* 2>/dev/null
 
-			mkfs.ext4 -L $VOLUME_LABEL $FS_DEVICE 2>/dev/null
+			mkfs.ext4 -q -F -L $VOLUME_LABEL $FS_DEVICE 2>/dev/null
 			# Write image to FS_DEVICE
-			echo -e "\nWRITING IMAGE TO DEVICE\n"
+			echo -e "\n[+]WRITING IMAGE TO DEVICE[+]\n"
 			dd status=progress if=$IMAGE_FILE_PATH of=$FS_DEVICE bs=1M conv=fsync
 			echo -e "[+]COMPLETE WRITING IMAGE[+]\n"
 		else
