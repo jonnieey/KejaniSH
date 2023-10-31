@@ -84,6 +84,8 @@ function FormatDevice {
 		else
 			exit 0
 		fi
+  else
+    exit 0
 	fi
 }
 
@@ -249,13 +251,13 @@ function TearDownScript {
 function Main {
 	echo -e "\n[++] CheckRequirements [++]"
 	CheckRequirements
-	echo "\n[++] GetImage [++]\n"
+	echo -e "\n[++] GetImage [++]\n"
 	GetImage
-	echo "\n[++] FormatDevice [++]\n"
+	echo -e "\n[++] FormatDevice [++]\n"
 	FormatDevice
-	echo "\n[++] SetupRPI [++]\n"
+	echo -e "\n[++] SetupRPI [++]\n"
 	SetupRPI
-	echo "\n[++] TearDownScript [++]\n"
+	echo -e "\n[++] TearDownScript [++]\n"
 	TearDownScript
 }
 
