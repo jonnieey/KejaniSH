@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 
-StartDir=$(dirname "$(readlink -fn "$0")")
+StartDir="$(dirname "$(readlink -fn "$0")")"
 BOOT_DIR="$StartDir/rpi-boot"
 ROOT_DIR="$StartDir/rpi-root"
 cd "$StartDir"
@@ -40,18 +40,18 @@ function ConfirmPrompt {
 }
 
 function DownloadRaspiOSImage {
-	echo "Downloading RaspiOS Image"
+	echo -e "\t[++]Downloading RaspiOS Image[++]"
 
 	downloadlink=$(
 		curl https://downloads.raspberrypi.com/raspios_lite_arm64_latest |
 			grep -o '<a href=['"'"'"][^"'"'"']*['"'"'"]' |
-			echo "Extracting RaspiOS Image"
 		sed -e 's/^<a href=["'"'"']//' -e 's/["'"'"']$//'
 	)
 
 	wget -c "$downloadlink"
 	image_archive=$(echo "$downloadlink" | sed 's/.*\///')
-	echo "RaspiOS Image Path: $image_file_path"
+	echo "\t[++]RaspiOS Image Path: $image_file_path[++]"
+  echo "\t[++]Extracting RaspiOS Image[++]"
 	xz -d "$image_archive"
 	image_file=$(ls | grep img)
 	# Get absoulte path of image_file
@@ -60,8 +60,10 @@ function DownloadRaspiOSImage {
 }
 
 function GetImage {
-	if [[ $DOWNLOAD_IMG == "yes" && -z $IMAGE_FILE_PATH ]]; then
+	if [[ "$DOWNLOAD_IMG" == "yes" && -z "$IMAGE_FILE_PATH" ]]; then
 		DownloadRaspiOSImage
+  else
+    echo -e "\n\t[++]Using $IMAGE_FILE_PATH[++]\n"
 	fi
 }
 
@@ -72,14 +74,14 @@ function FormatDevice {
 		echo -e "\n"
 		choice2=$(ConfirmPrompt "[**]ALL DATA WILL BE LOST[**] Are you sure you want to format $FS_DEVICE ? ")
 		if [ "$choice2" == "y" ]; then
-			echo -e "\nUnmounting $FS_DEVICE and its partitions\n"
+			echo -e "\n\t[++]Unmounting $FS_DEVICE and its partitions[++]\n"
 			umount -fl $FS_DEVICE* 2>/dev/null
 
 			mkfs.ext4 -q -F -L $VOLUME_LABEL $FS_DEVICE 2>/dev/null
 			# Write image to FS_DEVICE
-			echo -e "\n[+]WRITING IMAGE TO DEVICE[+]\n"
+			echo -e "\n\t[++]WRITING IMAGE TO DEVICE[++]\n"
 			dd status=progress if=$IMAGE_FILE_PATH of=$FS_DEVICE bs=1M conv=fsync
-			echo -e "[+]COMPLETE WRITING IMAGE[+]\n"
+			echo -e "\t[++]COMPLETE WRITING IMAGE[++]\n"
 		else
 			exit 0
 		fi
@@ -89,7 +91,6 @@ function FormatDevice {
 }
 
 function SetupUser {
-	echo "Setup user"
 	USER_PWD=$(openssl passwd -6 "$USER_PASSWORD")
 	echo "$USERNAME:$USER_PWD" >"$BOOT_DIR/userconf.txt"
 	mkdir -p $ROOT_DIR/etc/systemd/system/getty@tty1.service.d/
@@ -97,17 +98,15 @@ function SetupUser {
 
 function SetupNetwork {
 	CURRENT_HOSTNAME=$(cat $ROOT_DIR/etc/hostname | tr -d " \t\n\r")
-	echo $HOSTNAME >$ROOT_DIR/etc/hostname
-	sed -i "s/127.0.1.1.*$CURRENT_HOSTNAME/127.0.1.1\t$HOSTNAME/g" $ROOT_DIR/etc/hosts
+	echo "$HOSTNAME" >"$ROOT_DIR/etc/hostname"
+	sed -i "s/127.0.1.1.*$CURRENT_HOSTNAME/127.0.1.1\t$HOSTNAME/g" "$ROOT_DIR/etc/hosts"
 
-	if [ $USE_STATIC_IP == "yes" ]; then
+	if [ "$USE_STATIC_IP" == "yes" ]; then
 		SetupStaticIP
 	fi
 }
 
 function SetupStaticIP {
-	GATEWAY=$(echo $STATIC_IP_ADDRESS | sed 's/\.[0-9]*\/[0-9]*$/\.1/')
-
 	cat <<EOF >$ROOT_DIR/etc/NetworkManager/NetworkManager.conf
 [ifupdown]
 managed=true
@@ -120,8 +119,8 @@ if [ "\$2" = "up" ]; then
     case "\$1" in
         $STATIC_INTERFACE)
             ip route del default
-            ip route add $GATEWAY dev $STATIC_INTERFACE
-            ip route add default via $GATEWAY
+            ip route add $ROUTE dev $STATIC_INTERFACE
+            ip route add default via $ROUTE
             ;;
     esac
 fi
@@ -147,7 +146,7 @@ psk=$WIFI_PSK
 [ipv4]
 method=manual
 address1=$STATIC_IP_ADDRESS
-gateway1=$GATEWAY
+gateway1=$ROUTE
 dns=$STATIC_DOMAIN_NAME_SERVERS
  
 EOF
@@ -212,12 +211,12 @@ EOF
 
 function SetupRPI {
 
-	echo -e "[+] remove Existing $BOOT_PART and $ROOT_PART [+]"
+	echo -e "\t[++]remove Existing $BOOT_DIR and $ROOT_DIR[++]"
 	rm -rf $BOOT_DIR $ROOT_DIR
 	#
-	echo -e "[+] Create directory $BOOT_PART [+]"
+	echo -e "\t[++]Create directory $BOOT_DIR[++]"
 	mkdir -p $BOOT_DIR
-	echo -e "[+] Create directory $ROOT_PART [+]"
+	echo -e "\t[++]Create directory $ROOT_DIR[++]"
 	mkdir -p $ROOT_DIR
 	#
 	# read -p "Enter boot partition: (mostly first partition): " boot_partition
@@ -225,9 +224,9 @@ function SetupRPI {
 	BOOT_PART="$FS_DEVICE_PATH/${PARTITIONS[0]}"
 	ROOT_PART="$FS_DEVICE_PATH/${PARTITIONS[1]}"
 
-	echo -e "[+] Mounting $BOOT_PART to $BOOT_DIR [+]"
+	echo -e "\t[++]Mounting $BOOT_PART to $BOOT_DIR[++]"
 	mount $BOOT_PART $BOOT_DIR
-	echo -e "[+] Mounting $ROOT_PART to $ROOT_DIR [+]"
+	echo -e "\t[++]Mounting $ROOT_PART to $ROOT_DIR[++]"
 	mount $ROOT_PART $ROOT_DIR
 
 	# Enable ssh
@@ -243,7 +242,7 @@ function SetupRPI {
 }
 
 function TearDownScript {
-	echo -e "\nUnmounting $FS_DEVICE and its partitions\n"
+	echo -e "\n\t[++]Unmounting $FS_DEVICE and its partitions[++]\n"
 	umount -fl $FS_DEVICE* 2>/dev/null
 }
 
