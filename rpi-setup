@@ -66,6 +66,12 @@ function GetImage {
     echo -e "\n\t[++]Using $IMAGE_FILE_PATH[++]\n"
 	fi
 }
+function WriteImg {
+			# Write image to FS_DEVICE
+			echo -e "\n\t[++]WRITING IMAGE TO DEVICE[++]\n"
+			dd status=progress if=$IMAGE_FILE_PATH of=$FS_DEVICE bs=1M conv=fsync
+			echo -e "\t[++]COMPLETE WRITING IMAGE[++]\n"
+}
 
 function FormatDevice {
 	choice=$(ConfirmPrompt "[**]ALL DATA WILL BE LOST[**] Are you sure you want to format $FS_DEVICE ? ")
@@ -78,10 +84,6 @@ function FormatDevice {
 			umount -fl $FS_DEVICE* 2>/dev/null
 
 			mkfs.ext4 -q -F -L $VOLUME_LABEL $FS_DEVICE 2>/dev/null
-			# Write image to FS_DEVICE
-			echo -e "\n\t[++]WRITING IMAGE TO DEVICE[++]\n"
-			dd status=progress if=$IMAGE_FILE_PATH of=$FS_DEVICE bs=1M conv=fsync
-			echo -e "\t[++]COMPLETE WRITING IMAGE[++]\n"
 		else
 			exit 0
 		fi
@@ -253,6 +255,8 @@ function Main {
 	GetImage
 	echo -e "\n[++] FormatDevice [++]\n"
 	FormatDevice
+  echo -e "\n[++] Write image [++]\n"
+  WriteImg
 	echo -e "\n[++] SetupRPI [++]\n"
 	SetupRPI
 	echo -e "\n[++] TearDownScript [++]\n"
