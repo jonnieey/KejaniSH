@@ -1,0 +1,65 @@
+version: '3'
+services:
+  portainer:
+    image: "portainer/portainer-ce"
+    container_name: "portainer"
+    ports:
+      - "8000:8000"
+      - "9443:9443"
+    restart: unless-stopped
+    volumes:
+      - ${PORTAINER_DATA_DIR}:/data
+      - /run/user/1000/docker.sock:/var/run/docker.sock 
+    privileged: true
+
+  homeassistant:
+    container_name: "homeassistant"
+    env_file:
+      - .env
+    environment:
+      - TZ=Africa/Nairobi
+    image: "homeassistant/home-assistant:latest"
+    ports:
+      - ${HA_PORT}:8123
+    privileged: true
+    restart: unless-stopped
+    volumes:
+      - ${HA_CONFIG_DIR}:/config
+      - /etc/localtime:/etc/localtime:ro
+      - /run/dbus:/run/dbus:ro
+
+  appdaemon:
+    image: acockburn/appdaemon:latest
+    container_name: appdaemon
+    privileged: true
+    restart: always
+    volumes:
+      - ${HOME}/.HASS/appdaemon:/conf
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - 5050:5050
+    env_file:
+      - .env
+
+    environment:
+      - HA_URL=${HA_URL}
+      - TOKEN=${APPDAEMON_TOKEN}
+      - DASH_URL=${APPDAEMON_DASH_URL}
+
+  tailscale:
+    image: tailscale/tailscale
+    container_name: tailscaled
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env
+    volumes:
+      - ${TAILSCALE_DATA_DIR}:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+        - NET_ADMIN
+        - NET_RAW
+    environment:
+        - TS_AUTHKEY=${TS_AUTHKEY}
+        - TS_STATE_DIR=${TS_STATE_DIR}
+
