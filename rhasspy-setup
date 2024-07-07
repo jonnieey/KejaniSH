@@ -1,0 +1,68 @@
+#!/usr/bin/bash
+
+# install rootless docker
+#
+if [ "$(id -u)" != "0" ]; then
+  echo -e "\n\n[**] Please execute as root or sudoer[**]\n\n"
+  exit 1
+fi
+
+CURRENT_USER=${SUDO_USER:-$(whoami)}
+
+function EditUidSurbodinate {
+  subuid_file="/etc/subuid"
+  subgid_file="/etc/subgid"
+  files=($subuid_file $subgid_file)
+
+  for file in "${files[@]}"; do
+    if [ ! -f $file ]; then
+        echo "$CURRENT_USER:100000:65536" > "$file"
+    else
+      uid_count=$(grep -c "^$CURRENT_USER:" "$file")
+      if [[ "$uid_count" == 0 ]]; then
+          echo "Adding entries to $file for user $CURRENT_USER"
+          echo "$CURRENT_USER:100000:65536" >> "$file"
+      else
+          echo "Editing subordinate UIDs entries to $file for user $CURRENT_USER"
+        sed -i "s/^$CURRENT_USER:\([^:]\+\):\([^:]\+\)/$CURRENT_USER:\1:65536/" $file
+      fi
+    fi
+  done
+}
+
+function SetupRootlessDocker {
+    apt-get update -y && apt-get upgrade -y
+    apt-get install -y uidmap dbus-user-session fuse-overlayfs slirp4netns curl iptables
+    EditUidSurbodinate
+    systemctl disable --now docker.service docker.socket
+    su -c 'curl -fsSL https://get.docker.com/rootless' $CURRENT_USER | su -c 'sh' $CURRENT_USER
+    su -c "echo 'export PATH=/home/$CURRENT_USER/bin:$PATH' >> ~/.bashrc" $CURRENT_USER
+    su -c 'echo "export DOCKER_HOST=unix:///\$XDG_RUNTIME_DIR/docker.sock" >> ~/.bashrc' $CURRENT_USER
+    source ~/.bashrc
+    su -c 'dockerd-rootless-setuptool.sh install' $CURRENT_USER
+    su -c 'systemctl --user --now enable docker' $CURRENT_USER
+    su -c "loginctl enable-linger $CURRENT_USER" $CURRENT_USER
+
+}
+
+function SetupPipeWire {
+    apt-get install -y pipewire pipewire-pulse wireplumber
+    apt remove pulseaudio
+    su -c 'systemctl --user --now disable pulseaudio.service pulseaudio.socket' $CURRENT_USER
+    su -c 'systemctl --user mask pulseaudio' $CURRENT_USER
+    su -c 'systemctl --user --now enable pipewire pipewire-pulse wireplumber' $CURRENT_USER
+}
+
+function SetupHomeAssistant {
+    apt-get install -y docker-compose git
+    docker-compose up --build -d
+}
+
+function main {
+  EditUidSurbodinate
+  SetupRootlessDocker
+  SetupHomeAssistant
+  # SetupPipeWire
+
+}
+main
