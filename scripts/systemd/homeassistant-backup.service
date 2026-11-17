@@ -1,0 +1,10 @@
+[Unit]
+Description=Back up Home Assistant config, database and deployment inputs
+Documentation=file://%h/KejaniSH/README.md
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/KejaniSH/scripts/backup.sh
+Nice=10
+IOSchedulingClass=idle

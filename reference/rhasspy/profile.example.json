@@ -1,0 +1,40 @@
+{
+  "dialogue": {
+    "system": "rhasspy"
+  },
+  "handle": {
+    "system": "hass"
+  },
+  "home_assistant": {
+    "access_token": "",
+    "handle_type": "event",
+    "url": "http://192.168.100.110:8123"
+  },
+  "intent": {
+    "system": "fsticuffs"
+  },
+  "microphone": {
+    "arecord": {
+      "device": "default:CARD=Device"
+    },
+    "pyaudio": {
+      "device": "1"
+    },
+    "system": "arecord"
+  },
+  "sounds": {
+    "system": "aplay"
+  },
+  "speech_to_text": {
+    "system": "kaldi"
+  },
+  "text_to_speech": {
+    "system": "nanotts"
+  },
+  "wake": {
+    "porcupine": {
+      "keyword_path": "jarvis_raspberry-pi.ppn"
+    },
+    "system": "porcupine"
+  }
+}

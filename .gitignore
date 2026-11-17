@@ -1,0 +1,10 @@
+# Secrets and local deployment values
+.env
+
+# Device/config dumps that may contain WiFi credentials
+wled-cfg*.json
+wled-presets*.json
+
+# Variants of token files
+*.token
+*.token.txt
