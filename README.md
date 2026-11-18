@@ -120,6 +120,20 @@ compose file at the rollback tag, and start.
   Tailscale admin console (it cannot be revoked from the node). The node keeps
   its saved state and reconnects without it.
 
+## Known limitations
+
+- **No RTC and no UPS.** The Pi restores an approximate clock at boot and jumps
+  when NTP answers, so a sun trigger can be skipped after a power cut. The
+  `reconcile on start` automation fixes the light intent a few minutes after HA
+  starts; it does not replay the missed event.
+- **Phone push is local-only.** `notify.mobile_app_pixel_9a` (used by the DND
+  mirror) needs the Companion app connected to HA on the LAN. When the phone is
+  away or the app is asleep the call fails and the automation logs it as best
+  effort (`continue_on_error: true`). Add a cloud push URL to change that.
+- **Same device name = one legacy notifier.** Only one `mobile_app` entry may
+  use a given device name, or `notify.mobile_app_<device>` points at the wrong
+  one. Remove stale entries (Settings → Devices & services → Mobile App).
+
 ## Rhasspy reference data
 
 `reference/rhasspy/` keeps the old voice profile's `sentences.ini`, the `colors`

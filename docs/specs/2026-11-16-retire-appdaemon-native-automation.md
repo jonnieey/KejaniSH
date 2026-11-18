@@ -306,6 +306,28 @@ Repo cleanup (`jonnieey/KejaniSH`):
   If deploy keys are undesirable, mirror the Pi repo to GitHub by pushing the fetched branch from the local machine.
 - `README.md` (currently empty) becomes the runbook: topology, deploy, backup/restore, upgrade/rollback, and the secrets policy.
 
+### 5.12 Post-implementation findings (2026-11-18)
+
+- **Sun logic verified in production:** sunset fired unattended on 2026-11-18 at
+  18:32 (intent `on`, strip `on`). Sunrise was missed because the Pi rebooted
+  twice overnight (00:31 and 09:09) and, with no RTC, its clock jumped when NTP
+  corrected it; the `startup` reconcile restored the correct intent nine minutes
+  after HA came up. That is the designed fallback, not a regression.
+- The reboots left no clean-shutdown record and no undervoltage entries;
+  `vcgencmd get_throttled` reads `0x0` on the current boot. The most likely cause
+  is a power interruption — see follow-up 12.
+- **DND mirror:** `notify.mobile_app_pixel_9a` still exists on 2026.11 and is the
+  only path for Companion notification commands such as `command_dnd`
+  (`notify.send_message` accepts only `message`/`title`). Delivery is local-push
+  only — the phone's entry has `push_websocket_channel: true` and no `push_url`
+  or cloudhook — so it works while the app holds its WebSocket to HA and fails
+  with `not connected to local push notifications` otherwise. The automation now
+  sets `continue_on_error: true` and sends `ttl: 0` / `priority: high`; see
+  follow-up 13.
+- Registry cleanup: 16 → 14 config entries, 10 → 8 devices, 393 → 192 entities.
+  The stale Pixel 9a entry (app 2026.6.5) was the duplicate that takes over
+  `notify.mobile_app_<device>` when two registrations share a device name.
+
 ## 6. Execution plan
 
 Each phase is independently verifiable and revertible. Order matters: AppDaemon must stop **before** native HA logic is enabled, otherwise both drive the lights at sunrise/sunset.
@@ -906,3 +928,5 @@ Recorded so they are not lost; each is a separate change set.
 9. **Off-site backups:** add an rclone/SMB target and point both the script and HA's native *Backups* integration at it so an SD-card failure is recoverable.
 10. **Tailscale access:** the node's `tailscale set --ssh` is off because the tailnet ACL requires an interactive check per connection (§6, phase 8). Add an `ssh` rule with `action: accept` for this node (or for the admin user) and re-test before relying on it as the break-glass path. Revoke the 2024 `tailscale up` auth key in the admin console.
 11. **HA credentials:** the owner login and the OS login use different passwords; record the owner password in a password manager (the OS password is being rotated as part of phase 8).
+12. **Power resilience / RTC:** the Pi has no RTC and lost power twice on 2026-11-17/18. `fake-hwclock` + NTP then jump the clock, which can silently skip a sun trigger (the startup reconcile recovers the intent, but minutes late). Add a UPS/supercapacitor HAT or an RTC module, and consider `wait-online`/`timesyncd` ordering so the clock is settled before automations load.
+13. **Phone push:** `notify.mobile_app_pixel_9a` and the notify entity only deliver via local push while the app is connected to HA on the LAN. Add a cloud/remote push URL (Nabu Casa or another push server) if notifications must work when the phone is away, or treat DND mirroring as best-effort.
