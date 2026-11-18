@@ -322,7 +322,9 @@ Each phase is independently verifiable and revertible. Order matters: AppDaemon 
 | **7. Repo/secrets** | `.gitignore`, `.env.example`, untrack `.env`, purge history, force-push; deploy-key for Pi; README | `git ls-files` has no `.env`; raw URL 404; `gh api` shows key; Pi `git push` works | local `git reflog`/backup clone |
 | **8. Cleanup + SSH** | SSH keys, password change, `PasswordAuthentication no`; remove stale mobile_app entries; areas; entity names | key-only login works; phone notifies | keep an existing session open; revert sshd drop-in |
 
-**Phase 8 (SSH hardening) is deliberately last.** Locking out password auth on a headless Pi is the highest-risk change in this spec. Procedure: install the public key, verify with `ssh -o PreferredAuthentications=publickey`, enable `tailscale set --ssh` as a fallback, then disable password auth. If any step is unclear, stop.
+**Phase 8 (SSH hardening) is deliberately last.** Locking out password auth on a headless Pi is the highest-risk change in this spec. Procedure: install the public key, verify with `ssh -o PreferredAuthentications=publickey`, then disable password auth. If any step is unclear, stop.
+
+**Tailscale SSH (2026-11-18):** `tailscale set --ssh` was tried as a fallback and reverted. The tailnet policy currently requires an interactive check (`https://login.tailscale.com/a/…`) for each new connection, and enabling it reroutes all tailnet SSH through that check, which breaks key-based automation and offers no unattended fallback. Keep it off until the ACL grants `ssh` with `action: accept`, and re-test with a watchdog (`sleep 240; tailscale set --ssh=false`) in case the change locks you out.
 
 ## 7. Risks
 
@@ -902,3 +904,5 @@ Recorded so they are not lost; each is a separate change set.
 7. **Exposure:** HA (8123) is still reachable on the LAN; 5050/8000/9443/12101 are closed by this spec. Consider a reverse proxy with auth or Tailscale-only access for the HA UI in a later pass.
 8. **Entity naming:** friendly names/areas for all WLED diagnostic entities, and removal of the `update.wled_firmware` entity if firmware updates are handled manually.
 9. **Off-site backups:** add an rclone/SMB target and point both the script and HA's native *Backups* integration at it so an SD-card failure is recoverable.
+10. **Tailscale access:** the node's `tailscale set --ssh` is off because the tailnet ACL requires an interactive check per connection (§6, phase 8). Add an `ssh` rule with `action: accept` for this node (or for the admin user) and re-test before relying on it as the break-glass path. Revoke the 2024 `tailscale up` auth key in the admin console.
+11. **HA credentials:** the owner login and the OS login use different passwords; record the owner password in a password manager (the OS password is being rotated as part of phase 8).

@@ -116,7 +116,8 @@ compose file at the rollback tag, and start.
   `75c532ee…`, Rhasspy `f706ebbb…`). They were revoked in November 2026. Forks
   and caches may still contain them, so they must stay revoked — rewrites alone
   are not a rotation.
-- The Tailscale auth key used by `tailscale up` was also revoked; the node keeps
+- The Tailscale auth key used by `tailscale up` should be revoked in the
+  Tailscale admin console (it cannot be revoked from the node). The node keeps
   its saved state and reconnects without it.
 
 ## Rhasspy reference data
